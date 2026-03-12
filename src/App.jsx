@@ -37,17 +37,26 @@ export default function App() {
   }, [planned]);
 
   // --- CÁLCULO DE CRÉDITOS ---
+// --- CÁLCULO DE CRÉDITOS ---
   const completedCoursesObj = Array.from(completed).map(id => COURSES.find(c => c.id === id)).filter(Boolean);
-  const mandatoryCredits = completedCoursesObj.filter(c => c.type === 'mandatory').reduce((sum, c) => sum + c.credits, 0);
+  
+  // Generales: Niveles 1 y 2 (Sumarán exactamente 40 créditos)
+  const generalesCredits = completedCoursesObj.filter(c => c.type === 'mandatory' && c.level <= 2).reduce((sum, c) => sum + c.credits, 0);
+  
+  // Obligatorios de Facultad: Niveles 3 al 10 (Sumarán exactamente 144 créditos)
+  const mandatoryCredits = completedCoursesObj.filter(c => c.type === 'mandatory' && c.level >= 3).reduce((sum, c) => sum + c.credits, 0);
+  
+  // Electivos (Piden 21 créditos)
   const electiveCredits = completedCoursesObj.filter(c => c.type === 'elective').reduce((sum, c) => sum + c.credits, 0);
-  const generalStudiesCredits = 40;
-  const totalCompletedCredits = generalStudiesCredits + mandatoryCredits + electiveCredits;
+  
+  const totalCompletedCredits = generalesCredits + mandatoryCredits + electiveCredits;
 
   const plannedCredits = Array.from(planned).reduce((sum, id) => {
      const course = COURSES.find(c => c.id === id);
      return sum + (course ? course.credits : 0);
   }, 0);
 
+  // ... (deja la función toggleCourse intacta)
   const toggleCourse = (courseId, status, credits) => {
     if (status === 'locked') return;
 
@@ -75,7 +84,7 @@ export default function App() {
     setPlanned(newPlanned);
   };
 
-  // DIBUJO DE LÍNEAS (Solo se ejecuta si estamos en la vista de Malla)
+// DIBUJO DE LÍNEAS (Solo se ejecuta si estamos en la vista de Malla)
   useEffect(() => {
     if (activeView !== 'roadmap') return;
 
@@ -94,6 +103,13 @@ export default function App() {
         course.reqs.forEach(reqId => {
           const sourceEl = document.getElementById(`course-${reqId}`);
           if (!sourceEl) return;
+
+          // --- NUEVO: EVITAR LA TELARAÑA DE ELECTIVOS ---
+          const isHoveredLine = hoveredCourse === reqId || hoveredCourse === course.id;
+          // Si el curso es nivel 'E' (Electivo) y el mouse NO está encima, saltamos el dibujo
+          if (course.level === 'E' && !isHoveredLine) return;
+          // ----------------------------------------------
+
           const sourceRect = sourceEl.getBoundingClientRect();
           const sourceX = sourceRect.right - containerRect.left;
           const sourceY = sourceRect.top - containerRect.top + sourceRect.height / 2;
@@ -102,7 +118,7 @@ export default function App() {
           const isTargetCompleted = completed.has(course.id) || planned.has(course.id);
           
           let stroke = '#e5e7eb', strokeWidth = 1.5, zIndex = 0, opacity = 0.6;
-          if (hoveredCourse === reqId || hoveredCourse === course.id) {
+          if (isHoveredLine) {
             stroke = '#3b82f6'; strokeWidth = 3; zIndex = 10; opacity = 1;
           } else if (isSourceCompleted && isTargetCompleted) {
             stroke = completed.has(course.id) ? '#10b981' : '#6366f1'; strokeWidth = 2; opacity = 1;
@@ -123,7 +139,7 @@ export default function App() {
     const timer = setTimeout(calculateLines, 100);
     return () => { window.removeEventListener('resize', calculateLines); clearTimeout(timer); };
   }, [completed, planned, hoveredCourse, activeView]);
-
+  
   return (
     <div className="flex flex-col h-screen bg-gray-50 font-sans overflow-hidden">
       
@@ -140,8 +156,12 @@ export default function App() {
           </div>
         </div>
         
-        {/* CONTADORES */}
+       {/* CONTADORES */}
         <div className="flex flex-wrap justify-center gap-4 sm:gap-6">
+          <div className="text-center">
+            <p className="text-[10px] uppercase font-bold text-gray-500">Generales</p>
+            <p className="text-lg font-bold text-teal-600">{generalesCredits} <span className="text-xs text-gray-400 font-normal">/ 40</span></p>
+          </div>
           <div className="text-center">
             <p className="text-[10px] uppercase font-bold text-gray-500">Obligatorios</p>
             <p className="text-lg font-bold text-emerald-600">{mandatoryCredits} <span className="text-xs text-gray-400 font-normal">/ 144</span></p>
@@ -265,30 +285,46 @@ export default function App() {
 
       {/* 3. VISTA: MALLA CURRICULAR */}
       {activeView === 'roadmap' && (
-        <div className="flex-1 overflow-x-auto overflow-y-auto relative p-4 sm:p-8" ref={containerRef}>
-          <svg className="absolute top-0 left-0 w-full h-full pointer-events-none" style={{ minWidth: '2800px', minHeight: '100%' }}>{lines}</svg>
-          <div className="flex gap-12" style={{ minWidth: 'max-content' }}>
-            {Array.from({ length: 10 }).map((_, i) => {
-              const level = i + 1;
-              return (
-                <div key={level} className="flex flex-col gap-4 w-48 relative z-10">
-                  <div className="text-center mb-2"><span className="bg-gray-800 text-white text-xs font-bold px-2 py-1 rounded-full">Nivel {level}</span></div>
-                  {getLevelCourses(level).map(course => (
+        <div className="flex-1 overflow-auto p-4 sm:p-8">
+          {/* NUEVO CONTENEDOR INTERNO: Este div se mueve con el scroll, manteniendo las líneas pegadas */}
+          <div className="relative inline-block min-h-full" ref={containerRef} style={{ minWidth: 'max-content' }}>
+            
+            <svg className="absolute top-0 left-0 w-full h-full pointer-events-none" style={{ zIndex: 0 }}>
+              {lines}
+            </svg>
+            
+            <div className="flex gap-12 relative z-10">
+              {Array.from({ length: 10 }).map((_, i) => {
+                const level = i + 1;
+                return (
+                  <div key={level} className="flex flex-col gap-4 w-48 relative z-10">
+                    <div className="text-center mb-2"><span className="bg-gray-800 text-white text-xs font-bold px-2 py-1 rounded-full">Nivel {level}</span></div>
+                    {getLevelCourses(level).map(course => (
+                      <CourseCard key={course.id} course={course} status={getCourseStatus(course, completed, planned)} isHovered={hoveredCourse === course.id} onToggle={toggleCourse} onMouseEnter={setHoveredCourse} onMouseLeave={() => setHoveredCourse(null)} specializations={CERTIFICATIONS.filter(cert => cert.reqs.includes(course.id))} />
+                    ))}
+                  </div>
+                );
+              })}
+              
+              <div className="w-px bg-dashed border-l-2 border-dashed border-gray-300 mx-4"></div>
+              
+              <div className="flex flex-col gap-4 w-96 relative z-10">
+                <div className="text-center mb-2">
+                  <span className="bg-blue-600 text-white text-xs font-bold px-4 py-1 rounded-full shadow-sm">Bolsa de Electivos (Nivel E)</span>
+                  <p className="text-[10px] text-gray-500 mt-1">Ordenados por nivel de desbloqueo</p>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  {getLevelCourses('E')
+                    .sort((a, b) => {
+                      const levelA = a.minLevelCompleted || 5;
+                      const levelB = b.minLevelCompleted || 5;
+                      if (levelA !== levelB) return levelA - levelB;
+                      return a.reqs.length - b.reqs.length;
+                    })
+                    .map(course => (
                     <CourseCard key={course.id} course={course} status={getCourseStatus(course, completed, planned)} isHovered={hoveredCourse === course.id} onToggle={toggleCourse} onMouseEnter={setHoveredCourse} onMouseLeave={() => setHoveredCourse(null)} specializations={CERTIFICATIONS.filter(cert => cert.reqs.includes(course.id))} />
                   ))}
                 </div>
-              );
-            })}
-            <div className="w-px bg-dashed border-l-2 border-dashed border-gray-300 mx-4"></div>
-            <div className="flex flex-col gap-4 w-96 relative z-10">
-              <div className="text-center mb-2">
-                <span className="bg-blue-600 text-white text-xs font-bold px-4 py-1 rounded-full shadow-sm">Bolsa de Electivos (Nivel E)</span>
-                <p className="text-[10px] text-gray-500 mt-1">Se desbloquean al culminar el 5to ciclo</p>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                {getLevelCourses('E').map(course => (
-                  <CourseCard key={course.id} course={course} status={getCourseStatus(course, completed, planned)} isHovered={hoveredCourse === course.id} onToggle={toggleCourse} onMouseEnter={setHoveredCourse} onMouseLeave={() => setHoveredCourse(null)} specializations={CERTIFICATIONS.filter(cert => cert.reqs.includes(course.id))} />
-                ))}
               </div>
             </div>
           </div>
